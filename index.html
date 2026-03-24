@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>r/place</title>
+    <style>
+        body { margin:0; background:#111; color:white; overflow:hidden; font-family:Arial;}
+        #ui { position:fixed; top:10px; left:10px; background:#222; padding:10px; border-radius:10px;}
+        canvas { display:block; }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    🎨 <input type="color" id="colorPicker"><br>
+    <div id="cooldown">You are ready</div>
+</div>
+
+<canvas id="board"></canvas>
+
+<script>
+const canvas = document.getElementById("board");
+const ctx = canvas.getContext("2d");
+
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+const SIZE = 50;
+const BASE_PIXEL = 20;
+
+let scale = 1;
+let offsetX = 0;
+let offsetY = 0;
+
+let pixels = {};
+let hoverPixel = null;
+
+let ws = new WebSocket(
+    location.protocol === "https:" ? "wss://" + location.host : "ws://" + location.host
+);
+
+let myName = prompt("Your name?");
+let lastPlace = 0;
+
+function draw() {
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+
+    for (let key in pixels) {
+        let [x,y] = key.split("_").map(Number);
+
+        ctx.fillStyle = pixels[key];
+        ctx.fillRect(
+            x*BASE_PIXEL*scale+offsetX,
+            y*BASE_PIXEL*scale+offsetY,
+            BASE_PIXEL*scale,
+            BASE_PIXEL*scale
+        );
+    }
+
+    drawGrid();
+
+    if (hoverPixel) {
+        ctx.strokeStyle = "yellow";
+        ctx.strokeRect(
+            hoverPixel.x*BASE_PIXEL*scale+offsetX,
+            hoverPixel.y*BASE_PIXEL*scale+offsetY,
+            BASE_PIXEL*scale,
+            BASE_PIXEL*scale
+        );
+    }
+}
+
+function drawGrid() {
+    ctx.strokeStyle = "rgba(255,255,255,0.1)";
+    for (let x=0;x<SIZE;x++){
+        ctx.beginPath();
+        ctx.moveTo(x*BASE_PIXEL*scale+offsetX, offsetY);
+        ctx.lineTo(x*BASE_PIXEL*scale+offsetX, SIZE*BASE_PIXEL*scale+offsetY);
+        ctx.stroke();
+    }
+    for (let y=0;y<SIZE;y++){
+        ctx.beginPath();
+        ctx.moveTo(offsetX, y*BASE_PIXEL*scale+offsetY);
+        ctx.lineTo(SIZE*BASE_PIXEL*scale+offsetX, y*BASE_PIXEL*scale+offsetY);
+        ctx.stroke();
+    }
+}
+
+ws.onmessage = (msg)=>{
+    const data = JSON.parse(msg.data);
+
+    if(data.type==="init"){
+        pixels=data.canvas;
+        draw();
+    }
+
+    if(data.type==="update"){
+        pixels[data.pixel]=data.color;
+        draw();
+        showName(data.pixel,data.name);
+    }
+};
+
+canvas.addEventListener("click",(e)=>{
+    if(Date.now()-lastPlace<5000)return;
+
+    lastPlace=Date.now();
+
+    const x=Math.floor((e.clientX-offsetX)/(BASE_PIXEL*scale));
+    const y=Math.floor((e.clientY-offsetY)/(BASE_PIXEL*scale));
+
+    const color=document.getElementById("colorPicker").value;
+
+    ws.send(JSON.stringify({
+        type:"place",
+        pixel:x+"_"+y,
+        color:color,
+        name:myName
+    }));
+
+    startCooldown();
+});
+
+canvas.addEventListener("mousemove",(e)=>{
+    hoverPixel={
+        x:Math.floor((e.clientX-offsetX)/(BASE_PIXEL*scale)),
+        y:Math.floor((e.clientY-offsetY)/(BASE_PIXEL*scale))
+    };
+    draw();
+});
+
+canvas.addEventListener("wheel",(e)=>{
+    e.preventDefault();
+    scale*=e.deltaY<0?1.1:0.9;
+    draw();
+});
+
+let dragging=false,lastX,lastY;
+
+canvas.addEventListener("mousedown",(e)=>{
+    dragging=true;
+    lastX=e.clientX;
+    lastY=e.clientY;
+});
+
+canvas.addEventListener("mouseup",()=>dragging=false);
+
+canvas.addEventListener("mousemove",(e)=>{
+    if(!dragging)return;
+    offsetX+=e.clientX-lastX;
+    offsetY+=e.clientY-lastY;
+    lastX=e.clientX;
+    lastY=e.clientY;
+    draw();
+});
+
+let lastTouchDist=null;
+
+canvas.addEventListener("touchmove",(e)=>{
+    e.preventDefault();
+
+    if(e.touches.length===2){
+        const dx=e.touches[0].clientX-e.touches[1].clientX;
+        const dy=e.touches[0].clientY-e.touches[1].clientY;
+        const dist=Math.sqrt(dx*dx+dy*dy);
+
+        if(lastTouchDist){
+            scale*=dist/lastTouchDist;
+        }
+        lastTouchDist=dist;
+    }
+    draw();
+},{passive:false});
+
+function showName(pixel,name){
+    let [x,y]=pixel.split("_").map(Number);
+
+    ctx.fillStyle="white";
+    ctx.fillText(
+        name,
+        x*BASE_PIXEL*scale+offsetX,
+        y*BASE_PIXEL*scale+offsetY
+    );
+
+    setTimeout(draw,1000);
+}
+
+function startCooldown(){
+    let t=5;
+    const el=document.getElementById("cooldown");
+
+    const i=setInterval(()=>{
+        t--;
+        el.innerText="Wait "+t+"s";
+        if(t<=0){
+            el.innerText="You are ready";
+            clearInterval(i);
+        }
+    },1000);
+}
+</script>
+
+</body>
+</html>
